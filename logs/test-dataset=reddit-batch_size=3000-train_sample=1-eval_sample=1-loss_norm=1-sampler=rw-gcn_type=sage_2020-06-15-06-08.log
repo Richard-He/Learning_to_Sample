@@ -1,0 +1,6 @@
+2020-06-15-06:08 INFO: Start Logging
+2020-06-15-06:08 INFO: Log file path: ./logs/test-dataset=reddit-batch_size=3000-train_sample=1-eval_sample=1-loss_norm=1-sampler=rw-gcn_type=sage_2020-06-15-06-08.log
+2020-06-15-06:08 INFO: Model setting: {'epochs': 800, 'batch_size': 3000, 'dataset': 'reddit', 'train_sample': 1, 'eval_sample': 1, 'loss_norm': 1, 'sampler': 'rw', 'gcn_type': 'sage', 'use_gpu': 1, 'save_log': 1, 'save_summary': 1, 'log_interval': 10}
+2020-06-15-06:08 INFO: Dataset: reddit
+2020-06-15-06:09 INFO: Use GraphSaint randomwalk sampler
+2020-06-15-06:09 INFO: GCN type: sage
