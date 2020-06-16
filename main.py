@@ -54,7 +54,7 @@ def train_sample(norm_loss, loss_op):
         optimizer.step()
         total_loss += loss.item() * data.num_nodes
         total_examples += data.num_nodes
-    print(data.n_id)
+    #print(data.n_id)
     return total_loss / total_examples
 
 
@@ -135,7 +135,7 @@ def eval_sample(norm_loss):
         buffer.update_best_valid_loss(data.n_id[mask], loss[mask])
         buffer.update_prob_each_class(data.n_id[mask], prob[mask])
 
-        meta_loss = torch.mean(meta_prob[new_indices][mask].squeeze() * loss[mask].squeeze())
+        meta_loss = torch.mean(meta_prob[new_indices][mask].squeeze() * loss[mask].squeeze() - torch.log(meta_prob[new_indices][mask]))
         meta_loss.backward()
         meta_optimizer.step()
 
@@ -238,7 +238,7 @@ if __name__ == '__main__':
     logger.info('GCN type: {}'.format(args.gcn_type))
     model = Net(in_channels=dataset.num_node_features,
                 hidden_channels=256,
-                out_channels=dataset.num_classes).to(device)
+                out_channels=dataset.num_classes, drop_out=args.drop_out).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_op = build_loss_op(args)
 
@@ -246,8 +246,8 @@ if __name__ == '__main__':
     #Meta Model
     meta_sampler = Filter(in_channels=dataset.num_classes+2,
                           hidden_channels=16,
-                          out_channels=1).to(device)
-    meta_optimizer = torch.optim.Adam(meta_sampler.parameters(), lr=0.001)
+                          out_channels=1, drop_out=args.meta_drop_out).to(device)
+    meta_optimizer = torch.optim.Adam(meta_sampler.parameters(), lr=0.0001)
 
     #Buffer
     buffer = Buffer(num_nodes=data.num_nodes,
