@@ -1,27 +1,40 @@
-Test method of sampling graph and gcn model on pure graph task
+###Learning to Sample
 
+ 
 
-Example of running  
-Run graphsaint model on flicker dataset with sampling and loss normalization.
+####MetaModel Input:
 
-```shell script
-CUDA_VISIBLE_DEVICES=1 python main.py --dataset='reddit' --eval_sample=1 --batch_size=3000
-```
+1.Best Valid Loss at V_sample
 
-Dataset support:
-1. Flickr
-2. Reddit
-3. Yelp(exist error)
-4. PPI(exist error)
+2.Average Training Loss for the Past 5 time
 
-Sample support:
-1. Graphsaint random walker sampler.
-2. Random node sampler.
-3. 
+3.Probability for Each Class
 
+4.Label for each class 
 
-TODO 06-07:
-1. Fix bias in sampling evaluation. Done
-2. Tensorboard for visualization.
-3. More sampler and more gcn net.
-4. Write own dataset loader for custom data.
+TODO:
+
+- [X] Change the actual value to the rank
+- [ ] Loss Function
+- [ ] Soft Decision
+ 
+
+ 
+
+####Decision:
+
+Prob>0.5 choose
+
+Prob<0.5 drop
+
+ 
+
+####Meta_loss
+
+Prob*Valid_Loss
+
+ 
+
+####Issue:
+
+Variance too small
