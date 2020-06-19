@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import SAGEConv, GATConv, GraphConv
+from scipy.stats import rankdata
 
 
 class Filter(nn.Module):
@@ -10,8 +11,8 @@ class Filter(nn.Module):
         super(Filter, self).__init__()
         self.in_channels = in_channels
         self.lin = torch.nn.Linear(hidden_channels*2 , out_channels)
-        self.conv1 = {'sage': SAGEConv, 'gat':GATConv, 'graph':GraphConv}.get(gcn)(self.in_channels, hidden_channels)
-        self.conv2 = {'sage': SAGEConv, 'gat':GATConv, 'graph':GraphConv}.get(gcn)(hidden_channels, hidden_channels)
+        self.conv1 = {'sage': SAGEConv, 'gat': GATConv, 'graph': GraphConv}.get(gcn)(self.in_channels, hidden_channels)
+        self.conv2 = {'sage': SAGEConv, 'gat': GATConv, 'graph': GraphConv}.get(gcn)(hidden_channels, hidden_channels)
         self.drop_out = drop_out
         self.lin.weight.data.uniform_(-1, 1)
 
@@ -31,7 +32,7 @@ class Buffer(nn.Module):
     def __init__(self, num_nodes, num_classes, y):
         super(Buffer, self).__init__()
         self.register_buffer('prob_each_class', torch.ones(num_nodes, num_classes) / num_classes)
-        self.register_buffer('best_valid_loss', torch.ones(num_nodes))
+        self.register_buffer('best_valid_loss', 2 * torch.ones(num_nodes))
         self.register_buffer('avg_train_loss', torch.zeros(num_nodes))
         self.register_buffer('num_train_loss', torch.zeros(num_nodes))
         self.register_buffer('labels', torch.zeros(num_nodes, num_classes))
@@ -61,13 +62,18 @@ class Buffer(nn.Module):
         return x
 
     def get_x_rank(self, n_id):
-        valid_loss = self.best_valid_loss[n_id].view(-1, 1)
-        _, val_rank = valid_loss.sort()
-        avg_train_loss = self.avg_train_loss[n_id].view(-1, 1)
-        _, train_rank = avg_train_loss.sort()
+        valid_loss = self.best_valid_loss[n_id].view(-1, 1).cpu().numpy()
+        val_rank = torch.from_numpy(rankdata(valid_loss)).float()
+        avg_train_loss = self.avg_train_loss[n_id].view(-1, 1).cpu().numpy()
+        train_rank = torch.from_numpy(rankdata(avg_train_loss)).float()
+        train_rank /= torch.max(train_rank)
+        val_rank /= torch.max(val_rank)
         prob_each_class = self.prob_each_class[n_id]
-        labels = self.labels[n_id].float()
-        x = torch.cat([val_rank, train_rank, prob_each_class, labels], dim=-1)
+        # labels = self.labels[n_id].float()
+        # if labels.dim() == 1:
+        #     labels = labels.view(-1, 1)
+        #     print(labels)
+        x = torch.cat([val_rank.view(-1, 1), train_rank.view(-1, 1), prob_each_class], dim=-1)
         return x
 
 

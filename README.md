@@ -1,40 +1,17 @@
-###Learning to Sample
+## Learning to Sample
 
  
 
-####MetaModel Input:
+#### MetaModel Input:
 
-1.Best Valid Loss at V_sample
-
-2.Average Training Loss for the Past 5 time
-
-3.Probability for Each Class
-
-4.Label for each class 
+1.Probabilities for each Label 
+2.Normalized Rank for Validation Loss
+3.Normalized Rank for Average Training Loss (past 5 epochs)
 
 TODO:
 
 - [X] Change the actual value to the rank
-- [ ] Loss Function
-- [ ] Soft Decision
+- [X] Loss Function
+- [X] Soft Decision
  
 
- 
-
-####Decision:
-
-Prob>0.5 choose
-
-Prob<0.5 drop
-
- 
-
-####Meta_loss
-
-Prob*Valid_Loss
-
- 
-
-####Issue:
-
-Variance too small

@@ -25,16 +25,18 @@ def train_sample(norm_loss, loss_op):
     meta_sampler.eval()
     total_loss = total_examples = 0
     for data in loader:
+
+
+        optimizer.zero_grad()
+
 ############# Meta Sampler section ################
         with torch.no_grad():
-            x = buffer.get_x(data.n_id).to(device)
-            meta_prob = meta_sampler(x, data.edge_index.to(device))
-            new_indices = (meta_prob.squeeze() > 0.5).nonzero()
-            new_indices = new_indices.cpu().squeeze()
-            data = filter_(data, new_indices)
+            x = buffer.get_x_rank(data.n_id).to(device)
             data = data.to(device)
+            meta_prob = meta_sampler(x, data.edge_index)
+            data.x *= meta_prob
+
 ############# End ###################################
-        optimizer.zero_grad()
         if norm_loss == 1:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
 
@@ -46,8 +48,8 @@ def train_sample(norm_loss, loss_op):
         avg_loss = calc_avg_loss(loss)
         prob = out.softmax(dim=-1)
         #print(loss.size(), 'ls')
-        buffer.update_prob_each_class(data.n_id[data.train_mask], prob[data.train_mask])
-        buffer.update_avg_train_loss(data.n_id[data.train_mask], avg_loss[data.train_mask])
+        #buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
+        buffer.update_avg_train_loss(data.n_id[data.train_mask].cpu(), avg_loss[data.train_mask].detach().cpu())
 ##########################################################
         loss = loss[data.train_mask].mean()
         
@@ -110,38 +112,27 @@ def eval_sample(norm_loss):
     res_df_list = []
     for data in loader:
 ###########################Meta################
-        x = buffer.get_x_rank(data.n_id).detach().to(device)
+        meta_optimizer.zero_grad()
+        x = buffer.get_x_rank(data.n_id).to(device)
 
-        meta_sampler.zero_grad()
-        meta_prob = meta_sampler(x, data.edge_index.to(device))
-        #print(meta_prob)
-        new_indices = (meta_prob.cpu().squeeze() > 0.5).nonzero()
-        new_indices = new_indices.squeeze()
-
-        data = filter_(data, new_indices)
         data = data.to(device)
-        #print(len(data.x), len(data.edge_index[0]), len(data.edge_norm))
+        meta_prob = meta_sampler(x, data.edge_index.to(device))
+        data.x = meta_prob * data.x
 ###############################################
-        with torch.no_grad():
-            if norm_loss == 1:
-                out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
-            else:
-                out = model(data.x, data.edge_index)
-
-            prob = out.softmax(dim=-1)
-            loss = loss_op(out, data)
-
-
-        avg_loss = calc_avg_loss
-        #print(len(loss), len(data.n_id))
+        if norm_loss == 1:
+            out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+        else:
+            out = model(data.x, data.edge_index)
+        prob = out.softmax(dim=-1)
+        loss = loss_op(out, data)
         mask = data.train_mask + data.val_mask
 
-        buffer.update_best_valid_loss(data.n_id[mask], avg_loss[mask])
-        buffer.update_prob_each_class(data.n_id[mask], prob[mask])
+        buffer.update_best_valid_loss(data.n_id[mask].cpu(), loss[mask].detach().cpu())
+        buffer.update_prob_each_class(data.n_id[mask].cpu(), prob[mask].detach().cpu())
 
-        meta_loss = torch.sum((1 - meta_prob[new_indices][mask].squeeze() - torch.log((1 - meta_prob[new_indices][mask]) * meta_prob[new_indices][mask]).squeeze())
-                              * loss[mask].squeeze())
-        meta_loss.backward()
+        loss = loss.mean()
+        loss.backward()
+
         meta_optimizer.step()
 
         out = out.log_softmax(dim=-1)
@@ -177,39 +168,33 @@ def eval_sample_multi(norm_loss):
     res_df_list = []
     accs = [[], [], []]
     for data in loader:
-
-
-        x = buffer.get_x(data.n_id).detach().to(device)
-
-        meta_sampler.zero_grad()
-        meta_prob = meta_sampler(x, data.edge_index.to(device))
-        #print(meta_prob)
-        new_indices = (meta_prob.cpu().squeeze() > 0.5).nonzero()
-        new_indices = new_indices.squeeze()
-
-        data = filter_(data, new_indices)
-        data = data.to(device)
-
+        meta_optimizer.zero_grad()
         train_mask = data.train_mask
         val_mask = data.val_mask
         test_mask = data.test_mask
-        with torch.no_grad():
-            if norm_loss == 1:
-                out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
-            else:
-                out = model(data.x, data.edge_index)
 
-            prob = out.softmax(dim=-1)
-            loss = loss_op(out, data)
-            avg_loss = calc_avg_loss(loss)
+        x = buffer.get_x_rank(data.n_id).to(device)
+        data = data.to(device)
+        meta_prob = meta_sampler(x, data.edge_index)
+        data.x = meta_prob * data.x
+
+
+        if norm_loss == 1:
+            out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+        else:
+            out = model(data.x, data.edge_index)
+
+        prob = out.softmax(dim=-1)
+        loss = loss_op(out, data)
+        avg_loss = calc_avg_loss(loss)
+        total_loss = torch.mean(avg_loss)
+        total_loss.backward()
         mask = train_mask + val_mask
 
-        buffer.update_best_valid_loss(data.n_id[mask], avg_loss[mask])
-        buffer.update_prob_each_class(data.n_id[mask], prob[mask])
+        buffer.update_best_valid_loss(data.n_id[mask].cpu(), avg_loss[mask].detach().cpu())
+        buffer.update_prob_each_class(data.n_id[mask].cpu(), prob[mask].detach().cpu())
 
-        meta_loss = torch.mean(meta_prob[new_indices][mask].squeeze() * avg_loss[mask].squeeze() - torch.log(
-            meta_prob[new_indices][mask]))
-        meta_loss.backward()
+
         meta_optimizer.step()
 
         # prob[prob >= 0.5] = 1
@@ -326,7 +311,7 @@ if __name__ == '__main__':
 
 
     #Meta Model
-    meta_sampler = Filter(in_channels=2*dataset.num_classes+2,
+    meta_sampler = Filter(in_channels=dataset.num_classes+2,
                           hidden_channels=16,
                           out_channels=1, drop_out=args.meta_drop_out).to(device)
     meta_optimizer = torch.optim.Adam(meta_sampler.parameters(), lr=args.meta_learning_rate)
@@ -334,7 +319,7 @@ if __name__ == '__main__':
     #Buffer
     buffer = Buffer(num_nodes=data.num_nodes,
                           num_classes=dataset.num_classes,
-                    y=data.y).to(device)
+                    y=data.y)
     # todo replace by tensorboard
     summary_accs_train = []
     summary_accs_test = []
