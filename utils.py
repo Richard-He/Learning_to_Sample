@@ -68,7 +68,7 @@ def build_sampler(args, data, save_dir):
                                 walk_length=2, sample_coverage=1000, save_dir=save_dir)
     elif args.sampler == 'rw':
         msg = 'Use GraphSaint randomwalk sampler'
-        loader = GraphSAINTRandomWalkSampler(data, batch_size=args.batch_size, walk_length=2,
+        loader = GraphSAINTRandomWalkSampler(data, batch_size=args.batch_size, walk_length=4,
                                              num_steps=5, sample_coverage=1000,
                                              save_dir=save_dir)
     elif args.sampler == 'node':

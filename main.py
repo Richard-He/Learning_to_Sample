@@ -34,21 +34,21 @@ def train_sample(norm_loss, loss_op):
             x = buffer.get_x_rank(data.n_id).to(device)
             data = data.to(device)
             meta_prob = meta_sampler(x, data.edge_index)
-            data.x *= meta_prob
+            data.x = data.x * meta_prob / torch.mean(meta_prob)
 
 ############# End ###################################
         if norm_loss == 1:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
-
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
+            loss = loss_op(out, data.y.type_as(out))
 
 ############## Meta Sampler Section ###################
-        loss = loss_op(out, data)
         avg_loss = calc_avg_loss(loss)
         prob = out.softmax(dim=-1)
         #print(loss.size(), 'ls')
-        #buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
+        buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
         buffer.update_avg_train_loss(data.n_id[data.train_mask].cpu(), avg_loss[data.train_mask].detach().cpu())
 ##########################################################
         loss = loss[data.train_mask].mean()
@@ -117,20 +117,23 @@ def eval_sample(norm_loss):
 
         data = data.to(device)
         meta_prob = meta_sampler(x, data.edge_index.to(device))
-        data.x = meta_prob * data.x
+        data.x = meta_prob * data.x / torch.mean(meta_prob)
+        #data.x = meta_prob * data.x
 ###############################################
         if norm_loss == 1:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
+            loss = loss_op(out, data.y.type_as(out))
+
         prob = out.softmax(dim=-1)
-        loss = loss_op(out, data)
         mask = data.train_mask + data.val_mask
 
         buffer.update_best_valid_loss(data.n_id[mask].cpu(), loss[mask].detach().cpu())
         buffer.update_prob_each_class(data.n_id[mask].cpu(), prob[mask].detach().cpu())
 
-        loss = loss.mean()
+        loss = loss[mask].mean()
         loss.backward()
 
         meta_optimizer.step()
@@ -176,16 +179,17 @@ def eval_sample_multi(norm_loss):
         x = buffer.get_x_rank(data.n_id).to(device)
         data = data.to(device)
         meta_prob = meta_sampler(x, data.edge_index)
-        data.x = meta_prob * data.x
-
+        data.x = meta_prob * data.x / torch.mean(meta_prob)
+        #data.x = meta_prob * data.x
 
         if norm_loss == 1:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
+            loss = loss_op(out, data.y.type_as(out))
 
         prob = out.softmax(dim=-1)
-        loss = loss_op(out, data)
         avg_loss = calc_avg_loss(loss)
         total_loss = torch.mean(avg_loss)
         total_loss.backward()
