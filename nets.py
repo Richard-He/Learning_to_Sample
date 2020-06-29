@@ -180,4 +180,4 @@ class GATNet(nn.Module):
         x = torch.cat([x1, x2, x3], dim=-1)
         x = self.lin(x)
 
-        return x.log_softmax(dim=-1)
+        return x

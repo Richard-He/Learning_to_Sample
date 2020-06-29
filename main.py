@@ -1,6 +1,7 @@
 from parse_args import parse_args, get_log_name
 import torch
 from torch_geometric.utils import degree
+from torch.distributions.bernoulli import Bernoulli
 import numpy as np
 from nets import SAGENet, GATNet
 
@@ -9,7 +10,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from utils import load_dataset, build_loss_op, build_sampler
 import pandas as pd
 from time import time
-from metanet import Filter, Buffer
+from metanet import Filter, Buffer, Temp_Gen
 from utils import filter_, calc_avg_loss
 # from metric_and_loss import MetaLoss
 
@@ -25,34 +26,44 @@ def train_sample(norm_loss, loss_op):
     meta_sampler.eval()
     total_loss = total_examples = 0
     for data in loader:
-
-
-        optimizer.zero_grad()
-
-############# Meta Sampler section ################
+############### meta sampling ##############################
         with torch.no_grad():
             x = buffer.get_x_rank(data.n_id).to(device)
             data = data.to(device)
-            meta_prob = meta_sampler(x, data.edge_index)
-            data.x *= meta_prob
+            if use_temperature:
+                meta_prob = meta_sampler(x, data.edge_index, next(temperature))
+            else:
+                meta_prob = meta_sampler(x, data.edge_index)
 
-############# End ###################################
-        if norm_loss == 1:
-            out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
-
+            if meta_sampler_type == 'normalized':
+                meta_prob = meta_prob / meta_prob.mean()
+            if meta_sampler_type == 'hard':
+                meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
+                                        torch.full_like(meta_prob, 0))
+                meta_prob = meta_prob / meta_prob.mean()
+            if meta_sampler_type == 'bernoulli':
+                sample_indices = Bernoulli(meta_prob.squeeze()).sample().resize(meta_prob.size()[0], 1)
+                meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
+                                        torch.full_like(meta_prob, 0))
+                meta_prob = meta_prob / meta_prob.mean()
+            if meta_sampler_type == 'none':
+                meta_prob = torch.full_like(meta_prob, 1)
+            data.x = data.x * meta_prob
+##################### forward ########################
+        if norm_loss:
+            out = model(data.x, data.edge_index,  data.edge_norm * data.edge_attr)
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
-
-############## Meta Sampler Section ###################
-        loss = loss_op(out, data)
+            loss = loss_op(out, data.y.type_as(out))
+############## update buffer ###################
         avg_loss = calc_avg_loss(loss)
         prob = out.softmax(dim=-1)
-        #print(loss.size(), 'ls')
-        #buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
+        buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
         buffer.update_avg_train_loss(data.n_id[data.train_mask].cpu(), avg_loss[data.train_mask].detach().cpu())
 ##########################################################
         loss = loss[data.train_mask].mean()
-        
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * data.num_nodes
@@ -111,30 +122,48 @@ def eval_sample(norm_loss):
     meta_sampler.train()
     res_df_list = []
     for data in loader:
-###########################Meta################
-        meta_optimizer.zero_grad()
+####################### meta-sampling ################
         x = buffer.get_x_rank(data.n_id).to(device)
-
         data = data.to(device)
-        meta_prob = meta_sampler(x, data.edge_index.to(device))
-        data.x = meta_prob * data.x
-###############################################
-        if norm_loss == 1:
+        if use_temperature:
+            meta_prob = meta_sampler(x, data.edge_index, next(temperature))
+        else:
+            meta_prob = meta_sampler(x, data.edge_index)
+
+        if meta_sampler_type == 'normalized':
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'hard':
+            meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
+                                    torch.full_like(meta_prob, 0))
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'bernoulli':
+            sample_indices = Bernoulli(meta_prob.squeeze()).sample().resize(meta_prob.size()[0], 1)
+            meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
+                                    torch.full_like(meta_prob, 0))
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'none':
+            meta_prob = torch.full_like(meta_prob, 1)
+        data.x = data.x * meta_prob
+################ forward #######################
+        if norm_loss:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
-        prob = out.softmax(dim=-1)
-        loss = loss_op(out, data)
-        mask = data.train_mask + data.val_mask
+            loss = loss_op(out, data.y.type_as(out))
 
+        prob = out.softmax(dim=-1)
+        mask = data.train_mask + data.val_mask
+############ update buffer #########################
         buffer.update_best_valid_loss(data.n_id[mask].cpu(), loss[mask].detach().cpu())
         buffer.update_prob_each_class(data.n_id[mask].cpu(), prob[mask].detach().cpu())
+############# calculate loss ########################
+        loss = loss[mask].sum()
 
-        loss = loss.mean()
+        meta_optimizer.zero_grad()
         loss.backward()
-
         meta_optimizer.step()
-
+################ calculate acc #######################
         out = out.log_softmax(dim=-1)
         pred = out.argmax(dim=-1)
 
@@ -166,44 +195,55 @@ def eval_sample_multi(norm_loss):
     model.set_aggr('add')
 
     res_df_list = []
-    accs = [[], [], []]
     for data in loader:
-        meta_optimizer.zero_grad()
+############### calculate mask used for calculating loss ##############
         train_mask = data.train_mask
         val_mask = data.val_mask
-        test_mask = data.test_mask
-
+        mask = train_mask + val_mask
+############### meta sampling #########################################
         x = buffer.get_x_rank(data.n_id).to(device)
         data = data.to(device)
-        meta_prob = meta_sampler(x, data.edge_index)
-        data.x = meta_prob * data.x
+        if use_temperature:
+            meta_prob = meta_sampler(x, data.edge_index, next(temperature))
+        else:
+            meta_prob = meta_sampler(x, data.edge_index)
 
+        if meta_sampler_type == 'normalized':
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'hard':
+            meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
+                                    torch.full_like(meta_prob, 0))
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'bernoulli':
+            sample_indices = Bernoulli(meta_prob.squeeze()).sample().resize(meta_prob.size()[0], 1)
+            meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
+                                    torch.full_like(meta_prob, 0))
+            meta_prob = meta_prob / meta_prob.mean()
+        if meta_sampler_type == 'none':
+            meta_prob = torch.full_like(meta_prob, 1)
+        data.x = data.x * meta_prob
 
-        if norm_loss == 1:
-            out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
+        if norm_loss:
+            out = model(data.x, data.edge_index,  data.edge_norm * data.edge_attr)
+            loss = loss_op(out, data)
         else:
             out = model(data.x, data.edge_index)
+            loss = loss_op(out, data.y.type_as(out))
 
         prob = out.softmax(dim=-1)
-        loss = loss_op(out, data)
+
+################# calculate avg loss for each node #############
         avg_loss = calc_avg_loss(loss)
         total_loss = torch.mean(avg_loss)
-        total_loss.backward()
-        mask = train_mask + val_mask
 
+##########
         buffer.update_best_valid_loss(data.n_id[mask].cpu(), avg_loss[mask].detach().cpu())
         buffer.update_prob_each_class(data.n_id[mask].cpu(), prob[mask].detach().cpu())
 
-
+        meta_optimizer.zero_grad()
+        total_loss.backward()
         meta_optimizer.step()
 
-        # prob[prob >= 0.5] = 1
-        # prob[prob < 0.5] = 0
-        #
-        # accs[0].append(f1_score(data.y[train_mask].cpu().numpy(), prob[train_mask].cpu().numpy(), average='micro'))
-        # accs[1].append(f1_score(data.y[val_mask].cpu().numpy(), prob[val_mask].cpu().numpy(), average='micro'))
-        # accs[2].append(f1_score(data.y[test_mask].cpu().numpy(), prob[test_mask].cpu().numpy(), average='micro'))
-        # return [np.mean(i) for i in accs]
         res_batch = (out > 0).float().cpu().numpy()
         res_batch = pd.DataFrame(res_batch)
         res_batch['nid'] = data.indices.cpu().numpy()
@@ -246,7 +286,7 @@ if __name__ == '__main__':
 
     args = parse_args(config_path='./default_hparams.yml')
     log_name = get_log_name(args, prefix='test')
-    if args.save_log == 1:
+    if args.save_log:
         logger = LightLogging(log_path=log_path, log_name=log_name)
     else:
         logger = LightLogging(log_name=log_name)
@@ -267,9 +307,12 @@ if __name__ == '__main__':
     data.indices = torch.arange(0, data.num_nodes)
     data.n_id = data.indices
     data.y = data.y.long()
+    use_temperature = args.use_temperature
+    if use_temperature:
+        temperature = Temp_Gen(1, 1.5, 50)
     #print(data.y.size(), 'ys', data.num_nodes, dataset.num_classes)
 
-
+    meta_sampler_type = args.meta_sampler_type
 
     # todo add it into dataset or rewrite it in easy way
     if not is_multi:
@@ -296,7 +339,7 @@ if __name__ == '__main__':
     # logger.info(msg2)
     #########################################
 
-    if args.use_gpu == 1:
+    if args.use_gpu:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     else:
         device = torch.device('cpu')
@@ -325,11 +368,11 @@ if __name__ == '__main__':
     summary_accs_test = []
 
     for epoch in range(1, args.epochs + 1):
-        if args.train_sample == 1:
+        if args.train_sample:
             loss = train_sample(norm_loss=args.loss_norm, loss_op=loss_op)
         else:
             loss = train_full(loss_op=loss_op)
-        if args.eval_sample == 1:
+        if args.eval_sample:
             if is_multi:
                 accs = eval_sample_multi(norm_loss=args.loss_norm)
             else:

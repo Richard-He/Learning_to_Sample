@@ -17,14 +17,14 @@ class Filter(nn.Module):
         self.lin.weight.data.uniform_(-1, 1)
 
 
-    def forward(self, x, edge_index, edge_weight=None):
+    def forward(self, x, edge_index, temperature=1, edge_weight=None):
         x1 = F.relu(self.conv1(x, edge_index, edge_weight))
         x1 = F.dropout(x1, p=self.drop_out, training=self.training)
         x2 = F.relu(self.conv2(x1, edge_index, edge_weight))
         x2 = F.dropout(x2, p=self.drop_out, training=self.training)
         x = torch.cat([x1, x2], dim=-1)
         x = self.lin(x)
-        return torch.sigmoid(x)
+        return torch.sigmoid(x / temperature)
 
 
 class Buffer(nn.Module):
@@ -69,11 +69,29 @@ class Buffer(nn.Module):
         train_rank /= torch.max(train_rank)
         val_rank /= torch.max(val_rank)
         prob_each_class = self.prob_each_class[n_id]
-        # labels = self.labels[n_id].float()
-        # if labels.dim() == 1:
-        #     labels = labels.view(-1, 1)
-        #     print(labels)
         x = torch.cat([val_rank.view(-1, 1), train_rank.view(-1, 1), prob_each_class], dim=-1)
         return x
 
+class Temp_Gen:
+
+    def __init__(self, val, decay, epochs):
+        super(Temp_Gen, self).__init__()
+        self.val = val
+        self.num = 0
+        self.epochs = epochs
+        self.decay = decay
+        self.eval = False
+
+    def eval(self):
+        self.eval = True
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self.num += 1
+        if self.num == self.epochs:
+            self.num = 0
+            self.val *= self.decay
+        return self.val
 
