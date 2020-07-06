@@ -240,32 +240,32 @@ class GraphSAINTEdgeSampler(GraphSAINTSampler):
         return node_sample.unbind(dim=0)
 
 
-# class GraphSAINTRandomWalkSampler(GraphSAINTSampler):
-#     r"""The GraphSAINT random walk sampler class (see
-#     :class:`torch_geometric.data.GraphSAINTSampler`).
-#     Args:
-#         batch_size (int): The number of walks to sample per batch.
-#         walk_length (int): The length of each random walk.
-#     """
-#     def __init__(self, data, batch_size, walk_length, num_steps=1,
-#                  sample_coverage=50, save_dir=None, num_workers=0, log=True):
-#         self.walk_length = walk_length
-#         super(GraphSAINTRandomWalkSampler,
-#               self).__init__(data, batch_size, num_steps, sample_coverage,
-#                              save_dir, num_workers, log)
-#
-#     @property
-#     def __filename__(self):
-#         return (f'{self.__class__.__name__.lower()}_{self.walk_length}_'
-#                 f'{self.sample_coverage}.pt')
-#
-#     def __sample_nodes__(self, num_examples):
-#         start = torch.randint(0, self.N, (num_examples, self.batch_size),
-#                               dtype=torch.long)
-#         node_sample = self.adj.random_walk(start.flatten(), self.walk_length)
-#         node_sample = node_sample.view(
-#             num_examples, self.batch_size * (self.walk_length + 1))
-#         return node_sample.unbind(dim=0)
+class GraphSAINTRandomWalkSampler(GraphSAINTSampler):
+    r"""The GraphSAINT random walk sampler class (see
+    :class:`torch_geometric.data.GraphSAINTSampler`).
+    Args:
+        batch_size (int): The number of walks to sample per batch.
+        walk_length (int): The length of each random walk.
+    """
+    def __init__(self, data, batch_size, walk_length, num_steps=1,
+                 sample_coverage=50, save_dir=None, num_workers=0, log=True):
+        self.walk_length = walk_length
+        super(GraphSAINTRandomWalkSampler,
+              self).__init__(data, batch_size, num_steps, sample_coverage,
+                             save_dir, num_workers, log)
+
+    @property
+    def __filename__(self):
+        return (f'{self.__class__.__name__.lower()}_{self.walk_length}_'
+                f'{self.sample_coverage}.pt')
+
+    def __sample_nodes__(self, num_examples):
+        start = torch.randint(0, self.N, (num_examples, self.batch_size),
+                              dtype=torch.long)
+        node_sample = self.adj.random_walk(start.flatten(), self.walk_length)
+        node_sample = node_sample.view(
+            num_examples, self.batch_size * (self.walk_length + 1))
+        return node_sample.unbind(dim=0)
 
 
 class MySAINTSampler(object):

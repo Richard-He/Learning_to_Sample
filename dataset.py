@@ -6,6 +6,7 @@ import numpy as np
 import scipy.sparse as sp
 from google_drive_downloader import GoogleDriveDownloader as gdd
 from torch_geometric.data import InMemoryDataset, Data
+from torch_geometric.utils import to_undirected
 
 
 class PPI(InMemoryDataset):
@@ -54,15 +55,14 @@ class PPI(InMemoryDataset):
         gdd.download_file_from_google_drive(self.role_id, path)
 
     def process(self):
-        f = np.load(osp.join(self.raw_dir, 'adj_full.npz'))
-        adj = sp.csr_matrix((f['data'], f['indices'], f['indptr']), f['shape'])
-        adj = adj.tocoo()
-        row = torch.from_numpy(adj.row).to(torch.long)
-        col = torch.from_numpy(adj.col).to(torch.long)
-        edge_index = torch.stack([row, col], dim=0)
+        with np.load(osp.join(self.raw_dir, 'adj_full.npz')) as f:
+            adj = sp.csr_matrix((f['data'], f['indices'], f['indptr']), f['shape']).tocoo()
 
-        x = np.load(osp.join(self.raw_dir, 'feats.npy'))
+        edge_index = torch.tensor([adj.row, adj.col], dtype=torch.long)
+        x = np.load(osp.join(self.raw_dir, 'feats.npy')) 
         x = torch.from_numpy(x).to(torch.float)
+        
+        edge_index = to_undirected(edge_index, x.size(0))
 
         ys = [-1] * x.size(0)
         with open(osp.join(self.raw_dir, 'class_map.json')) as f:
