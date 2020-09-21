@@ -21,7 +21,7 @@ summary_path = './summary'
 torch.manual_seed(2020)
 
 
-def train_sample(norm_loss, loss_op):
+def train_sample(norm_loss, loss_op, epoch=None, savevec=False):
     model.train()
     model.set_aggr('add')
     meta_sampler.eval()
@@ -35,6 +35,8 @@ def train_sample(norm_loss, loss_op):
                 meta_prob = meta_sampler(x, data.edge_index, next(temperature))
             else:
                 meta_prob = meta_sampler(x, data.edge_index)
+            
+            
 
             if meta_sampler_type == 'normalized':
                 meta_prob = meta_prob / meta_prob.mean()
@@ -56,6 +58,14 @@ def train_sample(norm_loss, loss_op):
             out = model(data.x, data.edge_index)
             loss = loss_op(out, data.y.type_as(out))
 ############## update buffer ###################
+        if savevec:
+            torch.save(data.edge_index, f'./savept/edge_index_{epoch}.pt')
+            torch.save(meta_prob.squeeze(), f'./savept/meta_prob_{epoch}.pt')
+            for ratio in torch.arange(start=0.3, end=1, step=0.2):
+                torch.save(torch.topk(meta_prob.squeeze(), int(data.num_nodes * ratio))[1], f'./savept/top{ratio}_indices_{epoch}.pt')
+            torch.save(loss.squeeze(),  f'./savept/loss_{epoch}.pt')
+            savevec = False
+############## savept #############
         avg_loss = calc_avg_loss(loss)
         prob = out.softmax(dim=-1)
         buffer.update_prob_each_class(data.n_id[data.train_mask].cpu(), prob[data.train_mask].detach().cpu())
@@ -132,17 +142,17 @@ def eval_sample(norm_loss):
         if meta_sampler_type == 'normalized':
             meta_prob = meta_prob / meta_prob.mean()
             data.x = data.x * meta_prob
-        if meta_sampler_type == 'hard':
-            #meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
-            #                        torch.full_like(meta_prob, 0))
-            data = filter_(data.to('cpu'), (meta_prob.squeeze() > 0.5).nonzero().squeeze().cpu()).to(device)
-            meta_prob = meta_prob[meta_prob > 0.5]
-        if meta_sampler_type == 'bernoulli':
-            sample_indices = Bernoulli(meta_prob.squeeze()).sample().nonzero().squeeze()
-            # meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
-            #                         torch.full_like(meta_prob, 0))
-            data = filter_(data.to('cpu'), sample_indices.cpu()).to(device)
-            meta_prob = meta_prob[sample_indices]
+        # if meta_sampler_type == 'hard':
+        #     #meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
+        #     #                        torch.full_like(meta_prob, 0))
+        #     data = filter_(data.to('cpu'), (meta_prob.squeeze() > 0.5).nonzero().squeeze().cpu()).to(device)
+        #     meta_prob = meta_prob[meta_prob > 0.5]
+        # if meta_sampler_type == 'bernoulli':
+        #     sample_indices = Bernoulli(meta_prob.squeeze()).sample().nonzero().squeeze()
+        #     # meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
+        #     #                         torch.full_like(meta_prob, 0))
+        #     data = filter_(data.to('cpu'), sample_indices.cpu()).to(device)
+        #     meta_prob = meta_prob[sample_indices]
 ################ forward #######################
         if norm_loss:
             out = model(data.x, data.edge_index, data.edge_norm * data.edge_attr)
@@ -163,13 +173,13 @@ def eval_sample(norm_loss):
             meta_optimizer.zero_grad()
             loss.backward()
             meta_optimizer.step()
-        elif meta_sampler_type == 'hard' or 'bernoulli':
-            node_loss = -torch.log(node_loss)
-            node_loss = node_loss / node_loss.sum()
-            mloss = F.kl_div(node_loss, meta_prob.squeeze()/meta_prob.squeeze().sum())
-            meta_optimizer.zero_grad()
-            mloss.backward()
-            meta_optimizer.step()
+        # elif meta_sampler_type == 'hard' or 'bernoulli':
+        #     node_loss = -torch.log(node_loss)
+        #     node_loss = node_loss / node_loss.sum()
+        #     mloss = F.kl_div(node_loss, meta_prob.squeeze()/meta_prob.squeeze().sum())
+        #     meta_optimizer.zero_grad()
+        #     mloss.backward()
+        #     meta_optimizer.step()
 ################ calculate acc #######################
         out = out.log_softmax(dim=-1)
         pred = out.argmax(dim=-1)
@@ -214,17 +224,17 @@ def eval_sample_multi(norm_loss):
         if meta_sampler_type == 'normalized':
             meta_prob = meta_prob / meta_prob.mean()
             data.x = data.x * meta_prob
-        if meta_sampler_type == 'hard':
-            #meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
-            #                        torch.full_like(meta_prob, 0))
-            data = filter_(data.to('cpu'), (meta_prob.squeeze() > 0.5).nonzero().squeeze().cpu()).to(device)
-            meta_prob = meta_prob[meta_prob > 0.5]
-        if meta_sampler_type == 'bernoulli':
-            sample_indices = Bernoulli(meta_prob.squeeze()).sample().nonzero().squeeze()
-            # meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
-            #                         torch.full_like(meta_prob, 0))
-            data = filter_(data.to('cpu'), sample_indices.cpu()).to(device)
-            meta_prob = meta_prob[sample_indices]
+        # if meta_sampler_type == 'hard':
+        #     #meta_prob = torch.where(meta_prob > 0.5, torch.full_like(meta_prob, 1),
+        #     #                        torch.full_like(meta_prob, 0))
+        #     data = filter_(data.to('cpu'), (meta_prob.squeeze() > 0.5).nonzero().squeeze().cpu()).to(device)
+        #     meta_prob = meta_prob[meta_prob > 0.5]
+        # if meta_sampler_type == 'bernoulli':
+        #     sample_indices = Bernoulli(meta_prob.squeeze()).sample().nonzero().squeeze()
+        #     # meta_prob = torch.where(sample_indices != 0, torch.full_like(meta_prob, 1),
+        #     #                         torch.full_like(meta_prob, 0))
+        #     data = filter_(data.to('cpu'), sample_indices.cpu()).to(device)
+        #     meta_prob = meta_prob[sample_indices]
 
         if norm_loss:
             out = model(data.x, data.edge_index,  data.edge_norm * data.edge_attr)
@@ -251,11 +261,11 @@ def eval_sample_multi(norm_loss):
             meta_optimizer.zero_grad()
             total_loss.backward()
             meta_optimizer.step()
-        elif meta_sampler_type == 'hard' or 'bernoulli':
-            mloss = (meta_prob * avg_loss - torch.log((1 - meta_prob) * meta_prob)/100).mean()
-            meta_optimizer.zero_grad()
-            mloss.backward()
-            meta_optimizer.step()
+        # elif meta_sampler_type == 'hard' or 'bernoulli':
+        #     mloss = (meta_prob * avg_loss - torch.log((1 - meta_prob) * meta_prob)/100).mean()
+        #     meta_optimizer.zero_grad()
+        #     mloss.backward()
+        #     meta_optimizer.step()
 
         res_batch = (out > 0).float().cpu().numpy()
         res_batch = pd.DataFrame(res_batch)
@@ -382,7 +392,10 @@ if __name__ == '__main__':
 
     for epoch in range(1, args.epochs + 1):
         if args.train_sample:
-            loss = train_sample(norm_loss=args.loss_norm, loss_op=loss_op)
+            if epoch%100 ==0:
+                loss = train_sample(norm_loss=args.loss_norm,loss_op=loss_op,epoch=epoch,savevec=True)
+            else:
+                loss = train_sample(norm_loss=args.loss_norm,loss_op=loss_op)
         else:
             loss = train_full(loss_op=loss_op)
         if args.eval_sample:

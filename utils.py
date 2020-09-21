@@ -1,5 +1,5 @@
 import os.path as osp
-from torch_geometric.datasets import Flickr, Reddit, Yelp, Planetoid
+from torch_geometric.datasets import Flickr, Yelp, Reddit
 from dataset import PPI
 from torch_geometric.data import GraphSAINTRandomWalkSampler, \
     NeighborSampler, GraphSAINTNodeSampler, GraphSAINTEdgeSampler, ClusterData,\
@@ -23,7 +23,7 @@ def load_dataset(dataset='flickr'):
     Returns:
         dataset
     """
-    path = osp.join(osp.dirname(osp.realpath(__file__)), 'data', dataset)
+    path = osp.join('/mnt/data/lsdata', dataset)
     if dataset == 'flickr':
         dataset = Flickr(path)
 
@@ -75,11 +75,11 @@ def build_sampler(args, data, save_dir):
                                 walk_length=2, sample_coverage=1000, save_dir=save_dir)
     elif args.sampler == 'node-my':
         msg = 'Use random node sampler(mysaint sampler)'
-        loader = MySAINTSampler(data, sample_type='node', batch_size=args.batch_size * 3,
+        loader = MySAINTSampler(data, sample_type='node', batch_size=args.batch_size,
                                 walk_length=2, sample_coverage=1000, save_dir=save_dir)
     elif args.sampler == 'rw':
         msg = 'Use GraphSaint randomwalk sampler'
-        loader = GraphSAINTRandomWalkSampler(data, batch_size=args.batch_size, walk_length=4,
+        loader = GraphSAINTRandomWalkSampler(data, batch_size=int(args.batch_size/5), walk_length=4,
                                              num_steps=5, sample_coverage=1000,
                                              save_dir=save_dir)
     elif args.sampler == 'node':

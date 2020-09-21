@@ -1,6 +1,6 @@
 flickr:
-  epochs: 300
-  batch_size: 6000
+  epochs: 2000
+  #batch_size: 6000
 
   hparams:
     hidden_units:
@@ -8,8 +8,8 @@ flickr:
     learning_rate:
 
 reddit:
-  epochs: 1600
-  batch_size: 3000
+  epochs: 2000
+  #batch_size: 3000
 
 ppi:
   epochs: 2000
@@ -30,7 +30,7 @@ ppi-large:
     learning_rate:
 
 yelp:
-  epochs: 300
+  epochs: 2000
   batch_size: 6000
 
   hparams:
